@@ -1,0 +1,13 @@
+
+settings:
+  prefix: "&8[&cDungeonMaster&8]"
+  debug: false
+
+events:
+  default-duration-seconds: 600
+  allow-rejoining: true
+
+messages:
+  event-started: "&aA dungeon event has started!"
+  event-stopped: "&cThe dungeon event has ended."
+  no-active-event: "&7No dungeon event is currently active."
