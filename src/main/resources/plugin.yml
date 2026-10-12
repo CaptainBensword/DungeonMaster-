@@ -1,0 +1,21 @@
+
+name: DungeonMaster
+version: 0.1.0
+main: dev.dungeonmaster.DungeonMaster
+description: A configurable Minecraft dungeon event plugin.
+author: Sword Studios
+api-version: '1.13'
+
+commands:
+  dungeon:
+    description: Main Dungeon Master command.
+    usage: /dungeon
+    permission: dungeonmaster.use
+
+permissions:
+  dungeonmaster.use:
+    description: Allows players to use Dungeon Master commands.
+    default: true
+  dungeonmaster.admin:
+    description: Allows administrators to control dungeon events.
+    default: op
