@@ -24,47 +24,55 @@ public class DungeonMaster extends JavaPlugin {
 
     private BukkitTask joinTask;
     private BukkitTask eventTask;
+    private BukkitTask runTask;
 
     @Override
     public void onEnable() {
         saveDefaultConfig();
-
         getLogger().info("DungeonMaster V0.2 enabled!");
-        getLogger().info("Automatic dungeon events are being scheduled.");
-
         scheduleNextEvent();
     }
 
     @Override
     public void onDisable() {
-        if (joinTask != null) {
-            joinTask.cancel();
-        }
-
-        if (eventTask != null) {
-            eventTask.cancel();
-        }
-
+        cancelTask(joinTask);
+        cancelTask(eventTask);
+        cancelTask(runTask);
+        joinTask = null;
+        eventTask = null;
+        runTask = null;
         getLogger().info("DungeonMaster has been disabled.");
     }
 
+    private void cancelTask(BukkitTask task) {
+        if (task != null) {
+            task.cancel();
+        }
+    }
+
     private void scheduleNextEvent() {
+        // Keep at most one automatic event timer scheduled.
+        cancelTask(eventTask);
+        eventTask = null;
+
+        if (joinWindowOpen || runActive) {
+            return;
+        }
+
         int minMinutes = Math.max(1,
                 getConfig().getInt("events.minimum-interval-minutes", 30));
-
         int maxMinutes = Math.max(minMinutes,
                 getConfig().getInt("events.maximum-interval-minutes", 60));
 
         int delayMinutes = ThreadLocalRandom.current()
                 .nextInt(minMinutes, maxMinutes + 1);
-
         long delayTicks = delayMinutes * 60L * 20L;
 
         eventTask = Bukkit.getScheduler().runTaskLater(this, () -> {
+            eventTask = null;
+
             if (Bukkit.getOnlinePlayers().isEmpty()) {
-                getLogger().info(
-                        "No players online. Skipping this dungeon event."
-                );
+                getLogger().info("No players online; skipping this dungeon event.");
                 scheduleNextEvent();
                 return;
             }
@@ -72,9 +80,7 @@ public class DungeonMaster extends JavaPlugin {
             openEvent(null);
         }, delayTicks);
 
-        getLogger().info(
-                "Next dungeon event scheduled in " + delayMinutes + " minutes."
-        );
+        getLogger().info("Next dungeon event scheduled in " + delayMinutes + " minutes.");
     }
 
     private void openEvent(CommandSender starter) {
@@ -85,47 +91,40 @@ public class DungeonMaster extends JavaPlugin {
             return;
         }
 
+        // A manual start replaces the pending automatic event timer.
+        if (starter != null) {
+            cancelTask(eventTask);
+            eventTask = null;
+        }
+
         participants.clear();
         joinWindowOpen = true;
 
         int joinMinutes = Math.max(1,
                 getConfig().getInt("events.join-window-minutes", 10));
 
-        Bukkit.broadcastMessage(color(
-                "&8[&cDungeonMaster&8] &6&lA DUNGEON HAS OPENED!"
-        ));
-        Bukkit.broadcastMessage(color(
-                "&eUse &f/dungeon join &eto join the adventure!"
-        ));
-        Bukkit.broadcastMessage(color(
-                "&7You have &e" + joinMinutes
-                        + " minutes &7to join."
-        ));
+        Bukkit.broadcastMessage(color("&8[&cDungeonMaster&8] &6&lA DUNGEON HAS OPENED!"));
+        Bukkit.broadcastMessage(color("&eUse &f/dungeon join &eto join the adventure!"));
+        Bukkit.broadcastMessage(color("&7You have &e" + joinMinutes + " minutes &7to join."));
 
         if (starter != null) {
-            getLogger().info(
-                    "A dungeon event was manually opened by "
-                            + starter.getName() + "."
-            );
+            getLogger().info("A dungeon event was manually opened by " + starter.getName() + ".");
         } else {
             getLogger().info("A scheduled dungeon event has opened.");
         }
 
+        cancelTask(joinTask);
         joinTask = Bukkit.getScheduler().runTaskLater(
-                this,
-                this::beginRun,
-                joinMinutes * 60L * 20L
-        );
+                this, this::beginRun, joinMinutes * 60L * 20L);
     }
 
     private void beginRun() {
+        joinTask = null;
         joinWindowOpen = false;
 
         if (participants.isEmpty()) {
             Bukkit.broadcastMessage(color(
-                    "&8[&cDungeonMaster&8] &7The dungeon closed because nobody joined."
-            ));
-
+                    "&8[&cDungeonMaster&8] &7The dungeon closed because nobody joined."));
             finishRun();
             return;
         }
@@ -134,19 +133,14 @@ public class DungeonMaster extends JavaPlugin {
         World world = Bukkit.getWorld(worldName);
 
         if (world == null) {
-            getLogger().severe(
-                    "Dungeon world '" + worldName
-                            + "' is not loaded. The run cannot begin."
-            );
-
+            getLogger().warning("Dungeon world '" + worldName + "' is not loaded.");
             for (UUID id : participants) {
                 Player player = Bukkit.getPlayer(id);
-                if (player != null) {
+                if (player != null && player.isOnline()) {
                     sendMessage(player,
                             "&cThe dungeon world is unavailable. Please contact an admin.");
                 }
             }
-
             finishRun();
             return;
         }
@@ -156,13 +150,11 @@ public class DungeonMaster extends JavaPlugin {
         double z = getConfig().getDouble("dungeon.spawn.z", 0.5);
         float yaw = (float) getConfig().getDouble("dungeon.spawn.yaw", 0.0);
         float pitch = (float) getConfig().getDouble("dungeon.spawn.pitch", 0.0);
-
         Location start = new Location(world, x, y, z, yaw, pitch);
-        int teleported = 0;
 
+        int teleported = 0;
         for (UUID id : participants) {
             Player player = Bukkit.getPlayer(id);
-
             if (player != null && player.isOnline()) {
                 if (player.teleport(start)) {
                     sendMessage(player, "&aWelcome to the dungeon!");
@@ -175,35 +167,40 @@ public class DungeonMaster extends JavaPlugin {
 
         if (teleported == 0) {
             Bukkit.broadcastMessage(color(
-                    "&8[&cDungeonMaster&8] &7The dungeon run was cancelled."
-            ));
+                    "&8[&cDungeonMaster&8] &7The dungeon run was cancelled."));
             finishRun();
             return;
         }
 
         runActive = true;
-
         Bukkit.broadcastMessage(color(
-                "&8[&cDungeonMaster&8] &c&lTHE DUNGEON RUN HAS BEGUN!"
-        ));
+                "&8[&cDungeonMaster&8] &c&lTHE DUNGEON RUN HAS BEGUN!"));
+        getLogger().info("Dungeon run started with " + teleported + " participant(s).");
 
-        getLogger().info(
-                "Dungeon run started with " + teleported + " participant(s)."
-        );
-
-        // Enemy waves and completion logic will be added in a later update.
+        int runMinutes = Math.max(1,
+                getConfig().getInt("events.run-duration-minutes", 30));
+        runTask = Bukkit.getScheduler().runTaskLater(this, () -> {
+            runTask = null;
+            if (!runActive) {
+                return;
+            }
+            Bukkit.broadcastMessage(color(
+                    "&8[&cDungeonMaster&8] &eThe dungeon run has timed out!"));
+            finishRun();
+        }, runMinutes * 60L * 20L);
     }
 
     private void finishRun() {
+        cancelTask(joinTask);
+        cancelTask(runTask);
+        joinTask = null;
+        runTask = null;
+
         joinWindowOpen = false;
         runActive = false;
         participants.clear();
 
-        if (joinTask != null) {
-            joinTask.cancel();
-            joinTask = null;
-        }
-
+        // scheduleNextEvent() safely replaces any existing timer.
         scheduleNextEvent();
     }
 
@@ -249,7 +246,6 @@ public class DungeonMaster extends JavaPlugin {
             }
 
             Player player = (Player) sender;
-
             if (!joinWindowOpen) {
                 sendMessage(player, "&cThere is no dungeon currently open for joining.");
                 return true;
@@ -270,7 +266,6 @@ public class DungeonMaster extends JavaPlugin {
                 sendMessage(sender, "&cYou don't have permission to do that.");
                 return true;
             }
-
             openEvent(sender);
             return true;
         }
@@ -287,9 +282,7 @@ public class DungeonMaster extends JavaPlugin {
             }
 
             Bukkit.broadcastMessage(color(
-                    "&8[&cDungeonMaster&8] &cThe dungeon event has been stopped."
-            ));
-
+                    "&8[&cDungeonMaster&8] &cThe dungeon event has been stopped."));
             finishRun();
             sendMessage(sender, "&aDungeon event stopped.");
             return true;
